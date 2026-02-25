@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Zeiterfassung</title>
+<style>
+  :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;--bg:#f4f6f8;--card:#fff;--accent:#2563eb}
+  body{margin:0;background:var(--bg);color:#111;padding:18px}
+  .wrap{max-width:900px;margin:0 auto}
+  header{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px}
+  h1{font-size:18px;margin:0}
+  .card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 6px 18px rgba(0,0,0,0.06);margin-bottom:12px}
+  input,select,button{font-size:15px}
+  input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #d1d5db;margin-top:6px}
+  .row{display:flex;gap:8px}
+  .col{flex:1}
+  .btn{padding:10px 12px;border-radius:8px;border:none;cursor:pointer}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-danger{background:#ef4444;color:#fff}
+  .small{font-size:13px;color:#666}
+  .list-item{padding:8px;border-radius:8px;border:1px solid #eee;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .muted{color:#6b7280;font-size:13px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap}
+  .viewtabs{display:flex;gap:6px;margin-bottom:8px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:14px}
+  @media (max-width:520px){header{flex-direction:column;align-items:flex-start} .row{flex-direction:column}}
+  .chip{background:#f8fafc;border:1px solid #e6edf6;padding:6px 8px;border-radius:8px;font-size:13px}
+  .weekgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+  .daycell{background:#fff;padding:8px;border-radius:8px;min-height:64px;border:1px solid #eef2f7}
+  .daycell .date{font-weight:600;font-size:13px;margin-bottom:6px}
+  .entry-badge{display:block;background:#eef2ff;padding:4px 6px;border-radius:6px;font-size:12px;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Zeiterfassung</h1>
+    <div style="text-align:right">
+      <div class="small">Ansicht</div>
+      <div class="viewtabs">
+        <button class="btn chip" id="tab-day">Tag</button>
+        <button class="btn chip" id="tab-week">Woche</button>
+        <button class="btn chip" id="tab-month">Monat</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="card">
+    <div style="display:flex;gap:8px;align-items:center">
+      <div style="flex:1">
+        <label class="small">Kunde</label>
+        <select id="customerSelect"></select>
+        <input id="newCustomer" placeholder="Neuen Kunden hinzufügen (z.B. Fam. Wyss)" style="margin-top:8px" />
+      </div>
+      <div style="width:140px">
+        <label class="small">Aktion</label>
+        <div style="display:flex;gap:8px;margin-top:6px">
+          <button id="addCustomerBtn" class="btn">Hinzufügen</button>
+        </div>
+        <div style="margin-top:8px" class="small muted">Wähle Kunde, dann Start/Stop</div>
+      </div>
+    </div>
+
+    <hr style="margin:12px 0" />
+
+    <div class="row">
+      <div class="col">
+        <label class="small">Aktuelle Zeit</label>
+        <input id="statusLine" readonly />
+      </div>
+      <div style="width:160px;display:flex;flex-direction:column;gap:8px">
+        <button id="startBtn" class="btn btn-primary">Start</button>
+        <button id="stopBtn" class="btn btn-danger">Stop</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div>
+        <label class="small">Anzeige-Datum</label>
+        <input type="date" id="datePicker" />
+      </div>
+      <div style="display:flex;gap:8px" class="controls">
+        <button id="prev" class="btn">◀</button>
+        <button id="next" class="btn">▶</button>
+        <button id="gotoToday" class="btn">Heute</button>
+        <button id="exportCSV" class="btn">CSV Export</button>
+        <button id="clearAll" class="btn">Alles löschen</button>
+      </div>
+    </div>
+
+    <div id="viewContainer"></div>
+  </section>
+
+  <section class="card">
+    <h3>Letzte Einträge</h3>
+    <div id="recentList"></div>
+  </section>
+
+  <footer style="text-align:center;margin-top:12px" class="small muted">Speichert lokal. Vor Ersetzen: CSV exportieren (Backup).</footer>
+</div>
+
+<script>
+/* --- Datenverwaltung --- */
+const STORAGE_KEY = 'timeTrackerData_v2';
+
+function loadData(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : { customers: [], entries: [], running: null };
+  }catch(e){ return { customers: [], entries: [], running: null }; }
+}
+function saveData(d){ localStorage.setItem(STORAGE_KEY, JSON.stringify(d)); }
+
+let state = loadData();
+
+/* Zeit-Helpers */
+function nowIso(){ return new Date().toISOString(); }
+function fmtTime(iso){ if(!iso) return '—'; const d = new Date(iso); return d.toLocaleTimeString('de-CH',{hour:'2-digit',minute:'2-digit'}); }
+function fmtDate(iso){ if(!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('de-CH',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}); }
+function dateKey(iso){ return new Date(iso).toISOString().slice(0,10); }
+function hoursBetween(startIso,endIso){
+  const s = new Date(startIso), e = new Date(endIso);
+  const ms = e - s;
+  const hours = ms / 1000 / 60 / 60;
+  // genaue Rundung auf 2 Nachkommastellen:
+  return Math.round(hours * 100) / 100;
+}
+
+/* --- UI Referenzen --- */
+const customerSelect = document.getElementById('customerSelect');
+const newCustomer = document.getElementById('newCustomer');
+const addCustomerBtn = document.getElementById('addCustomerBtn');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const statusLine = document.getElementById('statusLine');
+const datePicker = document.getElementById('datePicker');
+const viewContainer = document.getElementById('viewContainer');
+const recentList = document.getElementById('recentList');
+const tabDay = document.getElementById('tab-day');
+const tabWeek = document.getElementById('tab-week');
+const tabMonth = document.getElementById('tab-month');
+const prevBtn = document.getElementById('prev');
+const nextBtn = document.getElementById('next');
+const gotoToday = document.getElementById('gotoToday');
+const exportCSV = document.getElementById('exportCSV');
+const clearAll = document.getElementById('clearAll');
+
+let currentView = 'day'; // day | week | month
+let cursorDate = new Date(); // Date object for current focus
+
+/* --- Initialisierung --- */
+function init(){
+  // customer select
+  renderCustomers();
+  // date picker
+  datePicker.value = cursorDate.toISOString().slice(0,10);
+  // running status
+  renderStatus();
+  // views
+  renderView();
+  renderRecent();
+
+  // Interval für Status-Update wenn läuft
+  setInterval(()=>{ renderStatus(); renderRecent(); renderView(); },1000);
+}
+function renderCustomers(){
+  // ensure unique customers
+  const list = state.customers || [];
+  customerSelect.innerHTML = '<option value="">-- Kunde wählen --</option>' +
+    list.map(c=>`<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+}
+function addCustomer(name){
+  const n = (name||newCustomer.value||'').trim();
+  if(!n) return alert('Name eingeben');
+  const id = 'c_'+Date.now();
+  state.customers.unshift({id,name:n});
+  saveData(state);
+  newCustomer.value='';
+  renderCustomers();
+  customerSelect.value = id;
+}
+
+/* --- Start / Stop --- */
+addCustomerBtn.onclick = ()=>addCustomer();
+startBtn.onclick = ()=>{
+  const custId = customerSelect.value;
+  if(!custId) return alert('Bitte Kunde wählen.');
+  if(state.running && state.running.end === null) {
+    // es läuft bereits etwas
+    return alert('Es läuft bereits eine Zeitmessung. Stoppe sie zuerst.');
+  }
+  const start = nowIso();
+  state.running = { id: 'r_'+Date.now(), customerId: custId, start, end: null };
+  saveData(state);
+  renderStatus();
+  renderRecent();
+};
+stopBtn.onclick = ()=>{
+  if(!state.running || state.running.end !== null){
+    return alert('Keine laufende Messung.');
+  }
+  // stoppe
+  state.running.end = nowIso();
+  // verschiebe in entries
+  state.entries = state.entries || [];
+  state.entries.unshift({
+    id: 'e_'+Date.now(),
+    customerId: state.running.customerId,
+    start: state.running.start,
+    end: state.running.end
+  });
+  // clear running
+  state.running = null;
+  saveData(state);
+  renderStatus();
+  renderRecent();
+  renderView();
+};
+
+function renderStatus(){
+  if(state.running && state.running.end === null){
+    const s = new Date(state.running.start);
+    const diff = hoursBetween(state.running.start, nowIso());
+    const cname = (state.customers.find(c=>c.id===state.running.customerId)||{name:'-' }).name;
+    statusLine.value = `${cname} — läuft seit ${fmtTime(state.running.start)}  (${diff} h)`;
+  }else{
+    statusLine.value = 'Keine laufende Zeitmessung';
+  }
+}
+
+/* --- Recent --- */
+function renderRecent(){
+  const list = state.entries || [];
+  recentList.innerHTML = '';
+  if(list.length === 0){ recentList.innerHTML = '<div class="small muted">Keine Einträge.</div>'; return; }
+  const shown = list.slice(0,8);
+  shown.forEach(e=>{
+    const c = state.customers.find(c=>c.id===e.customerId) || {name:'-'};
+    const hrs = e.end ? hoursBetween(e.start,e.end) : hoursBetween(e.start, nowIso());
+    const div = document.createElement('div'); div.className='list-item';
+    div.innerHTML = `<div>
+        <div style="font-weight:600">${escapeHtml(c.name)}</div>
+        <div class="muted">${(new Date(e.start)).toLocaleDateString('de-CH')} • ${fmtTime(e.start)} - ${e.end?fmtTime(e.end):'—'}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-weight:600">${hrs} h</div>
+        <div style="margin-top:6px"><button class="btn" onclick="deleteEntry('${e.id}')">Löschen</button></div>
+      </div>`;
+    recentList.appendChild(div);
+  });
+}
+
+/* --- Löschen --- */
+function deleteEntry(id){
+  if(!confirm('Eintrag löschen?')) return;
+  state.entries = state.entries.filter(x => x.id !== id);
+  saveData(state);
+  renderRecent();
+  renderView();
+}
+
+/* --- Views (Tag/Woche/Monat) --- */
+tabDay.onclick = ()=>{ currentView='day'; renderView(); };
+tabWeek.onclick = ()=>{ currentView='week'; renderView(); };
+tabMonth.onclick = ()=>{ currentView='month'; renderView(); };
+
+prevBtn.onclick = ()=>{
+  if(currentView==='day'){ cursorDate.setDate(cursorDate.getDate()-1); }
+  else if(currentView==='week'){ cursorDate.setDate(cursorDate.getDate()-7); }
+  else { cursorDate.setMonth(cursorDate.getMonth()-1); }
+  datePicker.value = cursorDate.toISOString().slice(0,10);
+  renderView();
+};
+nextBtn.onclick = ()=>{
+  if(currentView==='day'){ cursorDate.setDate(cursorDate.getDate()+1); }
+  else if(currentView==='week'){ cursorDate.setDate(cursorDate.getDate()+7); }
+  else { cursorDate.setMonth(cursorDate.getMonth()+1); }
+  datePicker.value = cursorDate.toISOString().slice(0,10);
+  renderView();
+};
+gotoToday.onclick = ()=>{
+  cursorDate = new Date();
+  datePicker.value = cursorDate.toISOString().slice(0,10);
+  renderView();
+};
+datePicker.onchange = (ev)=>{
+  cursorDate = new Date(ev.target.value + 'T00:00:00');
+  renderView();
+};
+
+function renderView(){
+  // highlight tab
+  [tabDay,tabWeek,tabMonth].forEach(t=>t.style.border='');
+  if(currentView==='day') tabDay.style.border='2px solid var(--accent)';
+  if(currentView==='week') tabWeek.style.border='2px solid var(--accent)';
+  if(currentView==='month') tabMonth.style.border='2px solid var(--accent)';
+
+  if(currentView==='day') renderDayView();
+  else if(currentView==='week') renderWeekView();
+  else renderMonthView();
+}
+
+/* Day View */
+function renderDayView(){
+  const dkey = cursorDate.toISOString().slice(0,10);
+  const entries = (state.entries||[]).filter(e => dateKey(e.start) === dkey);
+  const html = document.createElement('div');
+  html.innerHTML = `<div class="small muted" style="margin-bottom:8px">${fmtDate(cursorDate.toISOString())}</div>`;
+  if(entries.length===0) html.innerHTML += '<div class="muted small">Keine Einträge an diesem Tag.</div>';
+  else{
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Kunde</th><th>Start</th><th>Ende</th><th>Stunden</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    entries.forEach(e=>{
+      const c = state.customers.find(c=>c.id===e.customerId)||{name:'-'};
+      const hrs = e.end ? hoursBetween(e.start,e.end) : hoursBetween(e.start, nowIso());
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(c.name)}</td><td>${fmtTime(e.start)}</td><td>${e.end?fmtTime(e.end):'—'}</td><td>${hrs}</td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    html.appendChild(table);
+  }
+  viewContainer.innerHTML = ''; viewContainer.appendChild(html);
+}
+
+/* Week View */
+function startOfWeek(date){
+  const d = new Date(date);
+  const day = d.getDay(); // 0..6 (Sun..Sat)
+  // we want Monday as first day: if day==0 => go back 6
+  const diff = (day === 0) ? -6 : (1 - day);
+  d.setDate(d.getDate() + diff);
+  d.setHours(0,0,0,0);
+  return d;
+}
+function renderWeekView(){
+  const start = startOfWeek(cursorDate);
+  const grid = document.createElement('div');
+  grid.className = 'weekgrid';
+  for(let i=0;i<7;i++){
+    const day = new Date(start); day.setDate(start.getDate()+i);
+    const key = day.toISOString().slice(0,10);
+    const cell = document.createElement('div'); cell.className='daycell';
+    cell.innerHTML = `<div class="date">${day.toLocaleDateString('de-CH',{weekday:'short',day:'2-digit'})}</div>`;
+    // find entries for that day
+    const dayEntries = (state.entries||[]).filter(e => dateKey(e.start) === key);
+    dayEntries.forEach(e=>{
+      const cname = (state.customers.find(c=>c.id===e.customerId)||{name:'-'}).name;
+      const hrs = e.end ? hoursBetween(e.start,e.end) : hoursBetween(e.start, nowIso());
+      const span = document.createElement('span');
+      span.className='entry-badge';
+      span.textContent = `${cname} • ${hrs}h`;
+      span.onclick = ()=>{ cursorDate = new Date(key+'T00:00:00'); currentView='day'; datePicker.value=key; renderView(); };
+      cell.appendChild(span);
+    });
+    grid.appendChild(cell);
+  }
+  viewContainer.innerHTML=''; viewContainer.appendChild(grid);
+}
+
+/* Month View */
+function renderMonthView(){
+  const year = cursorDate.getFullYear(), month = cursorDate.getMonth();
+  const first = new Date(year,month,1);
+  const last = new Date(year,month+1,0);
+  const grid = document.createElement('div');
+  grid.style.display='grid';
+  grid.style.gridTemplateColumns='repeat(7,1fr)';
+  grid.style.gap='6px';
+  // pad with blanks until weekday of first (Mon..Sun)
+  let weekday = first.getDay(); if(weekday===0) weekday=7; // Mon=1..Sun=7
+  for(let pad=1; pad<weekday; pad++){
+    const blank = document.createElement('div'); blank.className='daycell'; blank.style.opacity=0.4; grid.appendChild(blank);
+  }
+  for(let d=1; d<=last.getDate(); d++){
+    const day = new Date(year,month,d);
+    const key = day.toISOString().slice(0,10);
+    const cell = document.createElement('div'); cell.className='daycell';
+    cell.innerHTML = `<div class="date">${d}</div>`;
+    const dayEntries = (state.entries||[]).filter(e => dateKey(e.start) === key);
+    let total=0;
+    dayEntries.forEach(e=>{
+      const cname = (state.customers.find(c=>c.id===e.customerId)||{name:'-'}).name;
+      const hrs = e.end ? hoursBetween(e.start,e.end) : hoursBetween(e.start, nowIso());
+      total += hrs;
+      const span = document.createElement('span'); span.className='entry-badge'; span.textContent = `${cname} • ${hrs}h`;
+      span.onclick = ()=>{ cursorDate = new Date(key+'T00:00:00'); currentView='day'; datePicker.value=key; renderView(); };
+      cell.appendChild(span);
+    });
+    // total per day
+    if(dayEntries.length>0){
+      const tot = document.createElement('div'); tot.style.marginTop='6px'; tot.style.fontWeight='600'; tot.textContent = `Summe: ${Math.round(total*100)/100} h`;
+      cell.appendChild(tot);
+    }
+    grid.appendChild(cell);
+  }
+  viewContainer.innerHTML=''; viewContainer.appendChild(grid);
+}
+
+/* --- CSV Export / Clear --- */
+exportCSV.onclick = ()=>{
+  const rows = [['Kunde','Datum','Start','Ende','Stunden']];
+  (state.entries||[]).slice().reverse().forEach(e=>{
+    const c = state.customers.find(c=>c.id===e.customerId)||{name:'-'};
+    const date = (new Date(e.start)).toISOString().slice(0,10);
+    const hrs = e.end ? hoursBetween(e.start,e.end) : hoursBetween(e.start, nowIso());
+    rows.push([c.name,date,fmtTime(e.start), e.end?fmtTime(e.end):'', String(hrs)]);
+  });
+  const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\\n');
+  const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='zeiterfassung_export.csv'; a.click(); URL.revokeObjectURL(url);
+  alert('CSV exportiert (Download).');
+};
+
+clearAll.onclick = ()=>{
+  if(!confirm('Alle Daten löschen? (Das ist endgültig)')) return;
+  state = { customers: [], entries: [], running: null };
+  saveData(state);
+  renderCustomers(); renderRecent(); renderView(); renderStatus();
+};
+
+/* --- Utility --- */
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* --- Delete helper (exposed) --- */
+window.deleteEntry = deleteEntry;
+
+/* --- Start --- */
+init();
+
+/* If there was a running session from before, keep it */
+if(state.running && state.running.end === null){
+  // keep running
+  console.log('Laufende Session gefunden');
+}
+
+</script>
+</body>
+</html>
