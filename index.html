@@ -33,6 +33,91 @@
   .daycell{background:#fff;padding:8px;border-radius:8px;min-height:64px;border:1px solid #eef2f7}
   .daycell .date{font-weight:600;font-size:13px;margin-bottom:6px}
   .entry-badge{display:block;background:#eef2ff;padding:4px 6px;border-radius:6px;font-size:12px;margin-bottom:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* --- Responsive fixes for small screens --- */
+* { box-sizing: border-box; }
+
+/* Hauptcontainer */
+.wrap {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 14px;        /* sorgt für Rand zum Bildschirmrand */
+}
+
+/* Karten */
+.card {
+  background: var(--card, #1f1f1f);
+  padding: 14px;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  overflow: visible;
+}
+
+/* Zeilen / Spalten: bei kleinen Bildschirmen untereinander */
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Default: zwei-spaltig für grosse Bildschirme */
+.col { flex: 1; min-width: 180px; }
+
+/* Buttons mobil: volle Breite, größere Touch-Fläche */
+button, .btn {
+  display: inline-block;
+  width: auto;
+  min-height: 44px; /* touch-freundlich */
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* wichtige Buttons sollen auf mobilen Bildschirmen volle Breite bekommen */
+.btn-block, .btn-full {
+  display: block;
+  width: 100%;
+  text-align: center;
+}
+
+/* Controls wie Datum + CSV-Buttons: in kleinere Bildschirme umbruchbar */
+.controls {
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+/* Input/select volle Breite in kleinen Spalten */
+input, select, textarea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 8px;
+}
+
+/* kleine Hilfstext-Box (Tooltip-ähnlich) nicht über Buttons legen */
+.small {
+  display:block;
+  margin-top:6px;
+  color:var(--muted,#999);
+}
+
+/* Bei sehr kleinen Bildschirmen: Spalten untereinander */
+@media (max-width: 600px) {
+  .row { flex-direction: column; align-items: stretch; }
+  .col { width: 100%; min-width: unset; }
+  .btn { font-size: 16px; padding: 12px; }
+  .controls { justify-content: flex-start; }
+  header { padding-bottom: 8px; }
+}
+
+/* Entferne absolute / overlay Effekte falls vorhanden */
+[style*="position:absolute"], .floating {
+  position: static !important;
+  transform: none !important;
+  z-index: auto !important;
+}
 </style>
 </head>
 <body>
